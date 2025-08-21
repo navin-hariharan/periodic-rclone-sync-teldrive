@@ -1,4 +1,4 @@
-FROM rclone/rclone
+FROM teldrive/rclone:latest
 
 RUN apk update && apk add openrc
 
