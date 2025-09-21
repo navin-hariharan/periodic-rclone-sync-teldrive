@@ -1,9 +1,8 @@
 #!/bin/sh
 
-LOG=/var/log/sync.log
-
-if [ "$(($(date +%s) / 60 % ${INTERVAL}))" -eq "0" ]
-then
-  rclone sync ${SOURCE} ${TARGET} ${OPTIONS} > ${LOG} && printf "periodic-rclone-sync complete: ${SOURCE} to ${TARGET}\n" >> ${LOG}
-  cat ${LOG}
+if [ "$(($(date +%s) / 60 % ${INTERVAL}))" -eq "0" ]; then
+  echo "==== $(date) Starting rclone sync ===="
+  rclone sync "${SOURCE}" "${TARGET}" ${OPTIONS}
+  echo "periodic-rclone-sync complete: ${SOURCE} → ${TARGET}"
+  echo "==== $(date) Sync finished ===="
 fi
