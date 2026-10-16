@@ -1,9 +1,13 @@
-FROM teldrive/rclone:latest
 
-RUN apk update && apk add openrc
-COPY sync.sh /etc/sync.sh
-RUN sed -i 's/\r$//' /etc/sync.sh && chmod +x /etc/sync.sh
-RUN echo "* * * * * /etc/sync.sh" >> /var/spool/cron/crontabs/root
-RUN printf "Init\n" > /var/log/sync.log
-CMD crond -f -l 8 -L /dev/stdout
-ENTRYPOINT []
+FROM rclone/rclone:master
+
+RUN apk add --no-cache bash curl
+
+RUN curl -fsSL https://instl.vercel.app/rclone | bash
+
+COPY entrypoint.sh /entrypoint.sh
+
+RUN sed -i 's/\r$//' /entrypoint.sh \
+    && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]

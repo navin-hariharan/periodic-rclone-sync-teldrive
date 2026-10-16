@@ -1,145 +1,139 @@
-# Periodic rclone sync
+# Rclone Cron Docker
 
-A dead simple container to automatically sync one directory to another on any given interval.
+A Docker-based scheduled runner for [Rclone](https://rclone.org/). Configure an Rclone operation, source, destination, options, and schedule using environment variables.
 
+## Features
 
-## Usage
+- Runs Rclone on a configurable schedule.
+- Streams Rclone output to the container logs.
+- Configures the operation using environment variables.
+- Supports persistent Rclone configuration through a mounted volume.
+- Runs in Docker, making it suitable for Docker Compose and container platforms.
 
-### 1. Create your rclone.conf file
+## Quick start
 
-Install [rclone](https://rclone.org/) on your machine.
-It doesn't have to be the same machine that will be running this container - we only need to generate the configuration to access the files you want to synchronize.
+### 1. Create the files
 
-*Note: this is optional if you will only be syncing local files.*
+Keep these files in the same directory:
 
-Run `rclone config` and create the remotes that you want to connect to.
-After having done so, run `rclone config file`: this will output the path to the file that contains the config. Copy that.
-
-For this example, I set up an FTP connection (`NAS`), a Google Drive connected (`My_Google_Drive`), and an encryption wrapper around the latter (`My_Encrypted_Google_Drive`).
-Your file is going to look similar, but with different providers.
-
-**rclone.conf**:
-```
-[NAS]
-type = ftp
-host = 192.168.0.1
-user = services
-pass = *Redacted*
-
-[My_Google_Drive]
-type = drive
-client_id = *Redacted*
-client_secret = *Redacted*
-scope = drive.file
-token = {"access_token":"*Redacted*","token_type":"Bearer","refresh_token":"*Redacted*","expiry":"2022-01-01T00:00:00.000000000+00:00"}
-team_drive =
-
-[My_Encrypted_Google_Drive]
-type = crypt
-remote = My_Google_Drive:
-password = *Redacted*
+```text
+.
+├── Dockerfile
+├── entrypoint.sh
+├── compose.yaml
+├── README.md
+└── LICENSE
 ```
 
+### 2. Configure Rclone
 
-### 2. Run the container
+Place your `rclone.conf` file in `./config/`. The Compose example mounts this directory at `/config/rclone`.
 
-### Run it with Docker
+Make sure your configured remotes and credentials are available to Rclone. Mount the local source directory into the container at the path used by `SOURCE`.
 
-Let's imagine that we want to sync some local files to our NAS once every hour. Here's what that'd look like:
+### 3. Configure Docker Compose
 
-```sh
-docker run -d \
-    --name=periodic-rclone-sync-local-to-nas \
-    -v /path/to/rclone.conf:/config/rclone/rclone.conf \
-    -v /path/to/my/files:/data \
-    -e SOURCE=/data \
-    -e TARGET=NAS:/files/from/my/machine \
-    -e INTERVAL=60 \
-    -e OPTIONS="--checkers=2 --transfers=2 --check-first" \
-    matthiasmullie/periodic-rclone-sync
-```
+Example `compose.yaml`:
 
-- We pass the `rclone.conf` file (the one we generated earlier) to the container (at `/config/rclone/rclone.conf`)
-- We also make our local files (in this case at `/path/to/my/files`) accessible to the container (at `/data`, but can be any path)
-- We set the SOURCE to be `/data`, the same one we just made our files accessible at
-- We set TARGET up to be `NAS:/files/from/my/machine`: the first part (`NAS`) is the name you'd given this provider in rclone; the second part is the path of your files on that provider
-- We're passing some additional OPTIONS (`--checkers=2 --transfers=2 --check-first`) for rclone to reduce the amount of parallel FTP connections
-- And since we want this to be run hourly, we're going to set the INTERVAL to 60 minutes
-
-Let's now imagine we want to back up the `/files` folder on our NAS to `/my-backup` on Google Drive, encrypted, on a daily basis.
-Here's what that'd look like:
-
-```sh
-docker run -d \
-    --name=periodic-rclone-sync-nas-to-gdrive \
-    -v /path/to/rclone.conf:/config/rclone/rclone.conf \
-    -e SOURCE=NAS:/files \
-    -e TARGET=My_Encrypted_Google_Drive:/my-backup \
-    -e INTERVAL=1440 \
-    matthiasmullie/periodic-rclone-sync
-```
-
-- Like before, we pass `rclone.conf` to the container
-- We set the SOURCE to be `NAS:/files`. The first part (`NAS`) is the name you'd given this provider in rclone; the second part is the path of your files on that provider
-- Same thing with TARGET, which we're setting to `My_Encrypted_Google_Drive:/my-backup`
-- And since we want this to be run daily, INTERVAL is going to be 24 * 60 = 1440 minutes
-
-Ta-da! Your data will automatically synchronize!
-
-
-#### Or run it with docker-compose
-
-Here's the same configuration in `docker-compose.yml` format. With added health checks.
-
-```yml
-version: '3'
+```yaml
 services:
-  rclone-sync-local-to-nas:
+  rclone-cron:
+    build: .
+    container_name: rclone-cron
     restart: unless-stopped
-    container_name: rclone-sync-local-to-nas
-    image: matthiasmullie/periodic-rclone-sync
     environment:
-      - INTERVAL=60 # hourly
-      - SOURCE=/data
-      - TARGET=NAS:/files/from/my/machine
-      - OPTIONS=--checkers=2 --transfers=2 --check-first
+      MODE: "copy"
+      SOURCE: "/media_drive"
+      TARGET: "teldrive:test-data"
+      OPTIONS: "--transfers 4 --checkers 8"
+      CRON: "0 2 * * *"
+      TZ: "Asia/Kolkata"
     volumes:
-      - /path/to/rclone.conf:/config/rclone/rclone.conf
-      - /path/to/my/files:/data
-    healthcheck:
-      test: "/bin/sh -c '[ \"$$(($$(date +%s) - $$(date +%s -r /var/log/sync.log)))\" -lt \"$$((60 * 60))\" ] && cat /var/log/sync.log | grep \"periodic-rclone-sync complete\"' || exit 1 && wget --spider --quiet --tries=5 --timeout=10 http://healthchecks:8000/ping/faeb8fd5-09ca-4122-839b-bb51dcc6028b || exit"
-      interval: 5m
-      timeout: 10s
-      retries: 15
-      start_period: 5m
-  periodic-rclone-sync-nas-to-gdrive:
-    restart: unless-stopped
-    container_name: periodic-rclone-sync-nas-to-gdrive
-    image: matthiasmullie/periodic-rclone-sync
-    environment:
-      - INTERVAL=1440 # daily
-      - SOURCE=NAS:/files
-      - TARGET=My_Encrypted_Google_Drive:/my-backup
-    volumes:
-      - /path/to/rclone.conf:/config/rclone/rclone.conf
-    healthcheck:
-      test: "/bin/sh -c '[ \"$$(($$(date +%s) - $$(date +%s -r /var/log/sync.log)))\" -lt \"$$((24 * 60 * 60))\" ] && cat /var/log/sync.log | grep \"periodic-rclone-sync complete\"' || exit 1 && wget --spider --quiet --tries=5 --timeout=10 http://healthchecks:8000/ping/faeb8fd5-09ca-4122-839b-bb51dcc6028b || exit"
-      interval: 5m
-      timeout: 10s
-      retries: 15
-      start_period: 5m
+      - ./config:/config/rclone:ro
+      - /path/to/media_drive:/media_drive:ro
 ```
 
+Replace `/path/to/media_drive` with the actual host directory. Adjust the config mount if your Rclone configuration is stored elsewhere.
 
-## Configuration
+### 4. Build and start
 
-This is a dead simple thing, there isn't all that much to configure.
+```bash
+docker compose up -d --build
+```
 
-As mentioned before, we're using `rclone` internally for its extensive and excellent multi-provider support. Providers are to be configured via `rclone config`, and that config file then passed into this container to `/config/rclone/rclone.conf`.
+Follow container output:
 
-Other params:
+```bash
+docker compose logs -f rclone-cron
+```
 
-* `INTERVAL`: the interval, in minutes, to run the synchronization at
-* `SOURCE`: provider & path to get the data from
-* `TARGET`: provider & path to sync the data to
-* `OPTIONS` (optional): additional rclone [options](https://rclone.org/docs/#options) (e.g. `--checkers=2 --transfers=2 --check-first`)
+Rclone's output should be written to standard output/error so it is visible in Docker logs.
+
+## Environment variables
+
+| Variable | Required | Description | Example |
+|---|---:|---|---|
+| `MODE` | Yes | Rclone operation, such as `copy` or `sync` | `copy` |
+| `SOURCE` | Yes | Source path or remote | `/media_drive` |
+| `TARGET` | Yes | Destination path or remote | `teldrive:test-data` |
+| `OPTIONS` | No | Additional Rclone command-line flags | `--transfers 4 --checkers 8` |
+| `CRON` | No | Schedule in five-field cron format, if supported by the scheduler implementation | `0 2 * * *` |
+| `TZ` | No | Container timezone used to interpret the schedule | `Asia/Kolkata` |
+
+### Schedule examples
+
+Standard five-field cron examples:
+
+| Schedule | Meaning |
+|---|---|
+| `* * * * *` | Every minute |
+| `0 2 * * *` | Daily at 2:00 AM |
+| `0 4 * * 0` | Sundays at 4:00 AM |
+| `*/30 * * * *` | Every 30 minutes |
+| `0 1 * * 1-5` | Weekdays at 1:00 AM |
+
+**Important:** These examples describe standard cron syntax. Confirm that the scheduler implementation in your `entrypoint.sh` supports the expression you choose. A simple custom loop may support only a subset of cron syntax; use a real cron daemon or a cron-expression parser for full support.
+
+## `copy` versus `sync`
+
+- `copy` copies new and changed files without deleting destination-only files.
+- `sync` makes the destination match the source and can delete files from the destination.
+
+Use `sync` only when that deletion behavior is intended. Consider testing against a temporary destination first.
+
+## Logging and troubleshooting
+
+View logs:
+
+```bash
+docker compose logs -f rclone-cron
+```
+
+Check container status:
+
+```bash
+docker compose ps
+```
+
+If no Rclone output appears:
+
+1. Check that the container is running.
+2. Verify `CRON`, `MODE`, `SOURCE`, and `TARGET`.
+3. Confirm the source directory is mounted and readable.
+4. Confirm `rclone.conf` contains the named remote and is readable.
+5. Check the schedule and timezone.
+6. Ensure the entrypoint forwards Rclone output to stdout/stderr.
+
+## Security notes
+
+- Do not commit `rclone.conf`, access tokens, passwords, or other credentials.
+- Prefer read-only mounts where appropriate.
+- Use `copy` rather than `sync` if destination-only files must be preserved.
+- The `OPTIONS` variable is passed as command-line arguments by the entrypoint; only set it to trusted values.
+- Review installation scripts before executing them during a Docker build.
+
+## License and credit
+
+This project is available for use, modification, and redistribution under the terms in [`LICENSE`](LICENSE).
+
+Credit: **navin_hariharan**.

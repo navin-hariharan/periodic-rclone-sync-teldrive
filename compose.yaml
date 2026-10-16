@@ -1,0 +1,16 @@
+services:
+  rclone-cron:
+    build: .
+    container_name: rclone-cron
+    restart: unless-stopped
+    environment:
+      MODE: "sync"
+      SOURCE: "/media_drive"
+      TARGET: "teldrive:test-data"
+      OPTIONS: "--checkers=10 --transfers=4 --progress --log-level=INFO --stats=10s --stats-one-line"
+      CRON: "* * * * *"
+      TZ: "Asia/Kolkata"
+    volumes:
+      - ./config:/config/rclone
+      - ./DATA:/media_drive
+    command: []
